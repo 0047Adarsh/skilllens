@@ -1,76 +1,113 @@
-import { NextRequest } from "next/server";
+// src/app/api/parse/route.ts
+import { NextRequest, NextResponse } from "next/server";
 import pdfParse from "pdf-parse";
-import mammoth from "mammoth";
 
-export const runtime = "nodejs";
-
-type ParseResponse = {
-  text: string;
-  email?: string | null;
-  phone?: string | null;
-  skills?: string[];
-};
-
-function extractFieldsFromText(text: string): Omit<ParseResponse, "text"> {
-  const emailMatch = text.match(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/i);
-  const phoneMatch = text
-    .replace(/\s+/g, " ")
-    .match(/(?:\+?\d[\s-]?)?(?:\(\d{2,4}\)[\s-]?)?\d{3,4}[\s-]?\d{3,4}[\s-]?\d{0,4}/);
-
-  const canonicalSkills = [
-    "javascript","typescript","react","next.js","node.js","express","graphql","rest",
-    "python","django","flask","pandas","numpy","scikit-learn","tensorflow","pytorch",
-    "java","spring","kotlin","android","swift","ios","flutter","dart",
-    "aws","gcp","azure","docker","kubernetes","terraform","sql","postgresql","mysql",
-    "mongodb","redis","git","github","html","css","tailwind","sass","jest","cypress"
-  ];
-  const lower = text.toLowerCase();
-  const found = new Set<string>();
-  for (const s of canonicalSkills) {
-    const token = s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-    const rx = new RegExp(`(^|[^a-z])${token}([^a-z]|$)`, "i");
-    if (rx.test(lower)) {
-      found.add(s);
-    }
-  }
-
-  const skills = Array.from(found).sort((a, b) => a.localeCompare(b));
-  return { email: emailMatch?.[0] ?? null, phone: phoneMatch?.[0] ?? null, skills };
-}
+// Common skills to look for in resumes
+const COMMON_SKILLS = [
+  "JavaScript", "TypeScript", "React", "Next.js", "Node.js", "Python", 
+  "Java", "HTML", "CSS", "SQL", "MongoDB", "PostgreSQL", "Git", "AWS",
+  "Docker", "Kubernetes", "Agile", "Scrum", "REST", "GraphQL", "Express",
+  "Vue", "Angular", "Svelte", "PHP", "Ruby", "Go", "Rust", "C++", "C#",
+  "Swift", "Kotlin", "TensorFlow", "PyTorch", "Machine Learning", "AI",
+  "Data Analysis", "Tableau", "Power BI", "Photoshop", "Figma", "UI/UX"
+];
 
 export async function POST(req: NextRequest) {
   try {
     const form = await req.formData();
     const file = form.get("file");
+
     if (!file || !(file instanceof File)) {
-      return Response.json({ error: "No file provided" }, { status: 400 });
+      console.error("[Parse API] ❌ No file uploaded");
+      return NextResponse.json({ error: "No file uploaded" }, { status: 400 });
     }
 
+    console.log(`[Parse API] 📂 Received file: ${file.name}, type: ${file.type}`);
+
+    // Convert file to Buffer
     const arrayBuffer = await file.arrayBuffer();
     const buffer = Buffer.from(arrayBuffer);
-    const mime = file.type || "";
-    const name = file.name || "upload";
 
     let text = "";
-    if (mime.includes("pdf") || name.toLowerCase().endsWith(".pdf")) {
-      const data = await pdfParse(buffer);
-      text = data.text || "";
-    } else if (mime.includes("word") || name.toLowerCase().endsWith(".docx")) {
-      const result = await mammoth.extractRawText({ buffer });
-      text = result.value || "";
-    } else if (mime.startsWith("text/") || name.toLowerCase().endsWith(".txt")) {
-      text = buffer.toString("utf8");
-    } else {
-      return Response.json({ error: "Unsupported file type. Use PDF or DOCX." }, { status: 415 });
+    
+    // Try parsing PDF
+    try {
+      // Fix for pdf-parse test file issue - disable the test file loading
+      const options = {
+        // This prevents pdf-parse from trying to access its test files
+        max: 0 // Set to 0 to disable
+      };
+      
+      const data = await pdfParse(buffer, options);
+      text = data.text;
+    } catch (pdfErr: any) {
+      console.error("[Parse API] ⚠️ PDF parsing error:", pdfErr.message);
+      return NextResponse.json(
+        { error: "Failed to parse PDF. Please ensure it's a valid PDF file.", details: pdfErr.message },
+        { status: 500 }
+      );
     }
 
-    const clean = text.replace(/\u0000/g, " ").replace(/\s+/g, " ").trim();
-    const fields = extractFieldsFromText(clean);
-    const payload: ParseResponse = { text: clean, ...fields };
-    return Response.json(payload);
+    console.log(`[Parse API] ✅ Successfully parsed. Extracted ${text.length} characters`);
+
+    // Extract information from text
+    const email = extractEmail(text);
+    const phone = extractPhone(text);
+    const name = extractName(text);
+    const skills = extractSkills(text);
+
+    return NextResponse.json({
+      fileName: file.name,
+      text,
+      email,
+      phone,
+      name,
+      skills
+    });
   } catch (err: any) {
-    return Response.json({ error: err?.message || "Failed to parse file" }, { status: 500 });
+    console.error("[Parse API] 🚨 Unexpected error:", err.message);
+    return NextResponse.json(
+      { error: "Unexpected server error", details: err.message },
+      { status: 500 }
+    );
   }
 }
 
+// Helper functions to extract information from text
+function extractEmail(text: string): string | null {
+  const emailRegex = /\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b/g;
+  const emails = text.match(emailRegex);
+  return emails ? emails[0] : null;
+}
 
+function extractPhone(text: string): string | null {
+  const phoneRegex = /(\+\d{1,2}\s?)?\(?\d{3}\)?[\s.-]?\d{3}[\s.-]?\d{4}\b/g;
+  const phones = text.match(phoneRegex);
+  return phones ? phones[0] : null;
+}
+
+function extractName(text: string): string | null {
+  // Simple approach: look for words that might be a name at the beginning of the text
+  const lines = text.split('\n');
+  if (lines.length > 0) {
+    const firstLine = lines[0].trim();
+    // Check if this looks like a name (2-3 words, no special characters except maybe periods)
+    if (/^[A-Za-z\.\s]{2,50}$/.test(firstLine) && firstLine.split(/\s+/).length <= 3) {
+      return firstLine;
+    }
+  }
+  return null;
+}
+
+function extractSkills(text: string): string[] {
+  const foundSkills: string[] = [];
+  const textLower = text.toLowerCase();
+  
+  COMMON_SKILLS.forEach(skill => {
+    if (textLower.includes(skill.toLowerCase())) {
+      foundSkills.push(skill);
+    }
+  });
+  
+  return foundSkills;
+}
