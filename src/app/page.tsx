@@ -1,4 +1,3 @@
-// src/app/page.tsx
 "use client";
 
 import { useState, useCallback } from "react";
@@ -21,7 +20,6 @@ export default function Home() {
   const [result, setResult] = useState<ParseResult | null>(null);
 
   const handleFileChange = (selectedFile: File) => {
-    // Validate file type
     const validTypes = [
       "application/pdf", 
       "application/vnd.openxmlformats-officedocument.wordprocessingml.document", 
@@ -33,7 +31,6 @@ export default function Home() {
       return;
     }
 
-    // Validate file size (5MB max)
     const maxSize = 5 * 1024 * 1024;
     if (selectedFile.size > maxSize) {
       setError("File size must be less than 5MB");
@@ -266,7 +263,7 @@ export default function Home() {
           
           <details className={styles.rawText}>
             <summary>View Extracted Text</summary>
-            <pre>{result.text}</pre>
+            <pre>{result.name}</pre>
           </details>
         </section>
       )}
