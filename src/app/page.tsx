@@ -85,9 +85,14 @@ export default function Home() {
       
       if (!res.ok) throw new Error(data?.error || "Failed to parse resume");
       setResult(data);
-    } catch (err: any) {
-      setError(err?.message || "Something went wrong during parsing");
-    } finally {
+    } catch (err: unknown) {
+  if (err instanceof Error) {
+    setError(err.message);
+  } else {
+    setError("Something went wrong during parsing");
+  }
+}
+ finally {
       setLoading(false);
     }
   }
