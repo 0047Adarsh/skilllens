@@ -263,7 +263,7 @@ export default function Home() {
           
           <details className={styles.rawText}>
             <summary>View Extracted Text</summary>
-            <pre>{result.name}</pre>
+            <pre>{result.text}</pre>
           </details>
         </section>
       )}
